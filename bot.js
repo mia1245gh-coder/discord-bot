@@ -251,6 +251,11 @@ async function handleButton(interaction) {
     return;
   }
 
+  if (interaction.customId.startsWith('recruit:close-ticket:')) {
+    await closeTicket(interaction);
+    return;
+  }
+
   if (!canReviewApplications(interaction.member)) {
     await interaction.reply({ content: 'Нет доступа к обработке заявок.', ephemeral: true });
     return;
@@ -377,6 +382,55 @@ async function handleModal(interaction) {
   }
 }
 
+async function closeTicket(interaction) {
+  const applicationId = interaction.customId.replace('recruit:close-ticket:', '');
+  const state = readState();
+  const application = state.applications.find(item => item.id === applicationId);
+
+  if (!application || application.ticketChannelId !== interaction.channelId) {
+    await interaction.reply({
+      content: 'Этот тикет не найден в базе бота.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  const canClose = interaction.user.id === application.userId || canReviewApplications(interaction.member);
+  if (!canClose) {
+    await interaction.reply({
+      content: 'Закрыть этот тикет может кандидат или состав рекрутинга.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  updateState(state => {
+    addEvent(state, {
+      type: 'ticket-closed',
+      applicationId: application.id,
+      actorId: interaction.user.id,
+      actorTag: interaction.user.tag,
+      userId: application.userId,
+      userTag: application.userTag
+    });
+  });
+
+  await interaction.reply({
+    content: 'Тикет закрыт. Канал будет удален автоматически через 10 секунд.'
+  });
+
+  setTimeout(async () => {
+    try {
+      const channel = await fetchChannel(interaction.channelId);
+      if (channel) {
+        await channel.delete(`Recruit ticket closed by ${interaction.user.tag}`);
+      }
+    } catch (error) {
+      console.error('Failed to delete ticket channel.', error);
+    }
+  }, 10000);
+}
+
 async function publishApplication(application, previous) {
   const channel = await fetchChannel(LOG_CHANNEL_ID);
   if (!channel) {
@@ -384,18 +438,9 @@ async function publishApplication(application, previous) {
     return;
   }
 
-  const message = await channel.send({
+  await channel.send({
     content: recruiterMentions(),
-    embeds: [applicationEmbed(application, previous)],
-    components: applicationButtons(application)
-  });
-
-  updateState(state => {
-    const item = state.applications.find(entry => entry.id === application.id);
-    if (item) {
-      item.messageId = message.id;
-      item.channelId = message.channel.id;
-    }
+    embeds: [applicationLogEmbed(application, previous)]
   });
 }
 
@@ -440,7 +485,7 @@ async function createTicketChannel(interaction, application, previous) {
     reason: `Recruit application ticket for ${application.userTag}`
   });
 
-  await channel.send({
+  const message = await channel.send({
     content: [
       `<@${application.userId}>`,
       recruiterMentions(),
@@ -450,6 +495,19 @@ async function createTicketChannel(interaction, application, previous) {
     embeds: [applicationEmbed(application, previous)],
     components: applicationButtons(application)
   });
+
+  updateState(state => {
+    const item = state.applications.find(entry => entry.id === application.id);
+    if (item) {
+      item.messageId = message.id;
+      item.channelId = message.channel.id;
+      item.ticketChannelId = channel.id;
+    }
+  });
+
+  application.messageId = message.id;
+  application.channelId = message.channel.id;
+  application.ticketChannelId = channel.id;
 
   return channel;
 }
@@ -487,7 +545,7 @@ async function updateApplicationMessage(interaction, application) {
 
   await message.edit({
     embeds: [applicationEmbed(application, previous)],
-    components: terminalStatus(application.status) ? [] : applicationButtons(application)
+    components: terminalStatus(application.status) ? ticketCloseComponents(application) : applicationButtons(application)
   });
 }
 
@@ -606,9 +664,13 @@ function inputRow(customId, label, style, placeholder) {
 function applicationEmbed(application, previous = []) {
   const status = statusMeta(application.status);
   const embed = new EmbedBuilder()
-    .setTitle(`${FAMILY_NAME} | Заявление`)
+    .setTitle(`${FAMILY_NAME} | Заявка в семью`)
     .setColor(status.color)
-    .setDescription(previous.length ? `Предыдущие заявки: ${previous.length}` : 'Предыдущие заявки: не найдено')
+    .setDescription([
+      previous.length ? `Предыдущие заявки: ${previous.length}` : 'Предыдущие заявки: не найдено',
+      '',
+      `Статус: **${status.label}**`
+    ].join('\n'))
     .addFields(
       { name: 'Ник в игре; возраст(OOC); имя (OOC)', value: crop(application.answers.profile), inline: false },
       { name: 'В каких семьях был(-а), почему ушел', value: crop(application.answers.previousFamilies), inline: false },
@@ -617,7 +679,6 @@ function applicationEmbed(application, previous = []) {
       { name: 'Пользователь', value: `<@${application.userId}>`, inline: true },
       { name: 'Username', value: application.username || '-', inline: true },
       { name: 'ID', value: application.userId, inline: true },
-      { name: 'Статус', value: status.label, inline: true },
       { name: 'Рекрутер', value: application.reviewerId ? `<@${application.reviewerId}>` : 'Не назначен', inline: true },
       { name: 'Тикет', value: application.ticketChannelId ? `<#${application.ticketChannelId}>` : 'Не создан', inline: true }
     )
@@ -632,6 +693,23 @@ function applicationEmbed(application, previous = []) {
   }
 
   return embed;
+}
+
+function applicationLogEmbed(application, previous = []) {
+  const status = statusMeta(application.status);
+  const lines = [
+    `Кандидат: <@${application.userId}>`,
+    `Username: **${application.username || '-'}**`,
+    `Discord ID: \`${application.userId}\``,
+    application.ticketChannelId ? `Тикет: <#${application.ticketChannelId}>` : '',
+    `Предыдущие заявки: **${previous.length || 'не найдено'}**`
+  ].filter(Boolean);
+
+  return new EmbedBuilder()
+    .setTitle(`${FAMILY_NAME} | Новая заявка`)
+    .setDescription(lines.join('\n'))
+    .setColor(status.color)
+    .setFooter({ text: formatDateTime(application.createdAt) });
 }
 
 function resultEmbed(application) {
@@ -704,15 +782,23 @@ function applicationButtons(application) {
   ];
 
   if (application.ticketChannelId) {
-    buttons.push(
-      new ButtonBuilder()
-        .setLabel('Открыть тикет')
-        .setStyle(ButtonStyle.Link)
-        .setURL(discordChannelUrl(application.ticketChannelId))
-    );
+    buttons.push(closeTicketButton(application));
   }
 
   return [new ActionRowBuilder().addComponents(...buttons)];
+}
+
+function ticketCloseComponents(application) {
+  return application.ticketChannelId
+    ? [new ActionRowBuilder().addComponents(closeTicketButton(application))]
+    : [];
+}
+
+function closeTicketButton(application) {
+  return new ButtonBuilder()
+    .setCustomId(`recruit:close-ticket:${application.id}`)
+    .setLabel('Закрыть тикет')
+    .setStyle(ButtonStyle.Secondary);
 }
 
 function statusMeta(status) {
