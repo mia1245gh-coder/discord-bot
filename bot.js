@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const http = require('node:http');
+const fs = require('node:fs');
 const path = require('node:path');
 const {
   ActionRowBuilder,
@@ -34,6 +35,8 @@ const PANEL_IMAGE_URL = process.env.PANEL_IMAGE_URL || '';
 const BRAND_ICON_URL = process.env.BRAND_ICON_URL || '';
 const LOCAL_PANEL_IMAGE = path.join(__dirname, 'assets', 'reinhard-panel.gif');
 const LOCAL_BRAND_ICON = path.join(__dirname, 'assets', 'reinhard-avatar.png');
+const PANEL_ATTACHMENT_NAME = 'reinhard-panel.gif';
+const BRAND_ATTACHMENT_NAME = 'reinhard-avatar.png';
 const FAMILY_NAME = process.env.FAMILY_NAME || 'Reinhard';
 const TICKET_NAME_PREFIX = process.env.TICKET_NAME_PREFIX || 'тикет';
 const RECRUITER_ROLE_IDS = splitIds(process.env.RECRUITER_ROLE_IDS);
@@ -130,7 +133,9 @@ async function handleCommand(interaction) {
       return;
     }
 
-    await interaction.channel.send({
+    await interaction.deferReply({ ephemeral: true });
+
+    const panelPayload = {
       embeds: [panelEmbed()],
       files: panelFiles(),
       components: [new ActionRowBuilder().addComponents(
@@ -139,9 +144,20 @@ async function handleCommand(interaction) {
           .setLabel('Подать заявку')
           .setStyle(ButtonStyle.Primary)
       )]
-    });
+    };
 
-    await interaction.reply({ content: 'Панель заявок опубликована.', ephemeral: true });
+    try {
+      await interaction.channel.send(panelPayload);
+    } catch (error) {
+      if (!panelPayload.files.length) {
+        throw error;
+      }
+
+      console.warn('Failed to send panel with local files, retrying without attachments.', error);
+      await interaction.channel.send({ ...panelPayload, files: [] });
+    }
+
+    await interaction.editReply({ content: 'Панель заявок опубликована.' });
     return;
   }
 
@@ -500,14 +516,14 @@ function panelEmbed() {
 
   if (PANEL_IMAGE_URL) {
     embed.setImage(PANEL_IMAGE_URL);
-  } else {
-    embed.setImage('attachment://reinhard-panel.gif');
+  } else if (fs.existsSync(LOCAL_PANEL_IMAGE)) {
+    embed.setImage(`attachment://${PANEL_ATTACHMENT_NAME}`);
   }
 
   if (BRAND_ICON_URL) {
     embed.setThumbnail(BRAND_ICON_URL);
-  } else {
-    embed.setThumbnail('attachment://reinhard-avatar.png');
+  } else if (fs.existsSync(LOCAL_BRAND_ICON)) {
+    embed.setThumbnail(`attachment://${BRAND_ATTACHMENT_NAME}`);
   }
 
   return embed;
@@ -521,11 +537,19 @@ function panelFiles() {
   const files = [];
 
   if (!PANEL_IMAGE_URL) {
-    files.push(new AttachmentBuilder(LOCAL_PANEL_IMAGE, { name: 'reinhard-panel.gif' }));
+    if (fs.existsSync(LOCAL_PANEL_IMAGE)) {
+      files.push(new AttachmentBuilder(LOCAL_PANEL_IMAGE, { name: PANEL_ATTACHMENT_NAME }));
+    } else {
+      console.warn(`Panel image not found: ${LOCAL_PANEL_IMAGE}`);
+    }
   }
 
   if (!BRAND_ICON_URL) {
-    files.push(new AttachmentBuilder(LOCAL_BRAND_ICON, { name: 'reinhard-avatar.png' }));
+    if (fs.existsSync(LOCAL_BRAND_ICON)) {
+      files.push(new AttachmentBuilder(LOCAL_BRAND_ICON, { name: BRAND_ATTACHMENT_NAME }));
+    } else {
+      console.warn(`Brand icon not found: ${LOCAL_BRAND_ICON}`);
+    }
   }
 
   return files;
