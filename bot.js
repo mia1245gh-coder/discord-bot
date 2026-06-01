@@ -17,6 +17,7 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle
 } = require('discord.js');
@@ -69,7 +70,7 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    if (interaction.isButton()) {
+    if (interaction.isButton() || interaction.isStringSelectMenu()) {
       await handleButton(interaction);
       return;
     }
@@ -136,13 +137,17 @@ async function handleCommand(interaction) {
     await interaction.deferReply({ ephemeral: true });
 
     const panelPayload = {
-      embeds: [panelEmbed()],
+      embeds: panelEmbeds(),
       files: panelFiles(),
       components: [new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
+        new StringSelectMenuBuilder()
           .setCustomId('recruit:open-modal')
-          .setLabel('Подать заявку')
-          .setStyle(ButtonStyle.Primary)
+          .setPlaceholder('Здесь Вы можете подать заявку')
+          .addOptions({
+            label: 'Подать заявку',
+            value: 'apply',
+            description: 'Открыть форму вступления в семью'
+          })
       )]
     };
 
@@ -154,7 +159,10 @@ async function handleCommand(interaction) {
       }
 
       console.warn('Failed to send panel with local files, retrying without attachments.', error);
-      await interaction.channel.send({ ...panelPayload, files: [] });
+      await interaction.channel.send({
+        embeds: panelEmbeds(false),
+        components: panelPayload.components
+      });
     }
 
     await interaction.editReply({ content: 'Панель заявок опубликована.' });
@@ -499,34 +507,41 @@ async function sendResultIfNeeded(interaction, application) {
   });
 }
 
-function panelEmbed() {
-  const embed = new EmbedBuilder()
-    .setTitle(`${FAMILY_NAME} | Заявки в семью`)
+function panelEmbeds(includeLocalFiles = true) {
+  const embeds = [];
+  const imageEmbed = new EmbedBuilder().setColor(0xf59e0b);
+
+  if (PANEL_IMAGE_URL) {
+    imageEmbed.setImage(PANEL_IMAGE_URL);
+    embeds.push(imageEmbed);
+  } else if (includeLocalFiles && fs.existsSync(LOCAL_PANEL_IMAGE)) {
+    imageEmbed.setImage(`attachment://${PANEL_ATTACHMENT_NAME}`);
+    embeds.push(imageEmbed);
+  }
+
+  const infoEmbed = new EmbedBuilder()
+    .setTitle('👋 Путь в семью начинается здесь!')
     .setDescription([
-      '**Путь в семью начинается здесь.**',
+      `• Уведомление о приглашении на обзвон обычно отправляется в личные сообщения. Если ЛС закрыты, оно отправляется в канал — ${resultChannelText()}. В этот канал также приходят уведомления об отказе в наборе.`,
       '',
-      'Заполните форму внимательно. После отправки бот создаст личный тикет, где заявку рассмотрит состав рекрутинга.',
+      'Обычно заявки обрабатываются в течение 3–7 дней — всё зависит от того, насколько загружены наши рекрутеры на данный момент.',
       '',
-      'Обычно заявка рассматривается по мере нагрузки рекрутеров. Если набор закрыт, бот не даст отправить новую заявку.',
+      'Подать заявку можно только при открытом наборе. Если не выходит — набор закрыт. Внимательно прочтите сообщение ниже.',
       '',
       'Не указывайте пароли, токены и другую конфиденциальную информацию.'
     ].join('\n'))
-    .setColor(0xf59e0b)
-    .setFooter({ text: `${FAMILY_NAME} Recruiting` });
-
-  if (PANEL_IMAGE_URL) {
-    embed.setImage(PANEL_IMAGE_URL);
-  } else if (fs.existsSync(LOCAL_PANEL_IMAGE)) {
-    embed.setImage(`attachment://${PANEL_ATTACHMENT_NAME}`);
-  }
+    .setColor(0xf59e0b);
 
   if (BRAND_ICON_URL) {
-    embed.setThumbnail(BRAND_ICON_URL);
-  } else if (fs.existsSync(LOCAL_BRAND_ICON)) {
-    embed.setThumbnail(`attachment://${BRAND_ATTACHMENT_NAME}`);
+    infoEmbed.setFooter({ text: `${FAMILY_NAME} 5RP`, iconURL: BRAND_ICON_URL });
+  } else if (includeLocalFiles && fs.existsSync(LOCAL_BRAND_ICON)) {
+    infoEmbed.setFooter({ text: `${FAMILY_NAME} 5RP`, iconURL: `attachment://${BRAND_ATTACHMENT_NAME}` });
+  } else {
+    infoEmbed.setFooter({ text: `${FAMILY_NAME} 5RP` });
   }
 
-  return embed;
+  embeds.push(infoEmbed);
+  return embeds;
 }
 
 function panelFiles() {
@@ -749,6 +764,10 @@ function hasAnyRole(member, roleIds) {
 function recruiterMentions() {
   const ids = [...new Set([...ADMIN_ROLE_IDS, ...RECRUITER_ROLE_IDS])];
   return ids.length ? ids.map(id => `<@&${id}>`).join(' ') : '';
+}
+
+function resultChannelText() {
+  return RESULT_CHANNEL_ID ? `<#${RESULT_CHANNEL_ID}>` : 'канал итогов';
 }
 
 async function fetchChannel(id) {
