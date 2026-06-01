@@ -29,9 +29,13 @@ DISCORD_GUILD_ID
 APPLICATION_LOG_CHANNEL_ID
 APPLICATION_RESULT_CHANNEL_ID
 CALL_CHANNEL_ID
+TICKET_CATEGORY_ID
 RECRUITER_ROLE_IDS
 ADMIN_ROLE_IDS
 FAMILY_NAME
+TICKET_NAME_PREFIX
+PANEL_IMAGE_URL
+BRAND_ICON_URL
 ```
 
 Start command:
@@ -51,6 +55,24 @@ API для сайта:
 ```txt
 /api/applications
 ```
+
+## Тикеты
+
+После отправки формы бот создает приватный канал:
+
+```txt
+тикет-username
+```
+
+Доступ получают только:
+
+```txt
+кандидат
+роли из RECRUITER_ROLE_IDS
+роли из ADMIN_ROLE_IDS
+```
+
+`@everyone` не видит канал.
 
 ## Права бота в Discord
 

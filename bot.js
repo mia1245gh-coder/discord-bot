@@ -1,10 +1,13 @@
 require('dotenv').config();
 
 const http = require('node:http');
+const path = require('node:path');
 const {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   Client,
   EmbedBuilder,
   GatewayIntentBits,
@@ -24,11 +27,15 @@ const GUILD_ID = process.env.DISCORD_GUILD_ID;
 const LOG_CHANNEL_ID = process.env.APPLICATION_LOG_CHANNEL_ID;
 const RESULT_CHANNEL_ID = process.env.APPLICATION_RESULT_CHANNEL_ID || LOG_CHANNEL_ID;
 const CALL_CHANNEL_ID = process.env.CALL_CHANNEL_ID;
+const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || '';
 const PORT = Number(process.env.PORT || 3000);
 
 const PANEL_IMAGE_URL = process.env.PANEL_IMAGE_URL || '';
 const BRAND_ICON_URL = process.env.BRAND_ICON_URL || '';
+const LOCAL_PANEL_IMAGE = path.join(__dirname, 'assets', 'reinhard-panel.gif');
+const LOCAL_BRAND_ICON = path.join(__dirname, 'assets', 'reinhard-avatar.png');
 const FAMILY_NAME = process.env.FAMILY_NAME || 'Reinhard';
+const TICKET_NAME_PREFIX = process.env.TICKET_NAME_PREFIX || 'тикет';
 const RECRUITER_ROLE_IDS = splitIds(process.env.RECRUITER_ROLE_IDS);
 const ADMIN_ROLE_IDS = splitIds(process.env.ADMIN_ROLE_IDS);
 
@@ -125,6 +132,7 @@ async function handleCommand(interaction) {
 
     await interaction.channel.send({
       embeds: [panelEmbed()],
+      files: panelFiles(),
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('recruit:open-modal')
@@ -284,7 +292,8 @@ async function handleModal(interaction) {
       reviewerTag: '',
       reason: '',
       messageId: '',
-      channelId: ''
+      channelId: '',
+      ticketChannelId: ''
     };
 
     const saved = updateState(state => {
@@ -299,9 +308,22 @@ async function handleModal(interaction) {
       return application;
     });
 
+    const ticketChannel = await createTicketChannel(interaction, saved, previous);
+    if (ticketChannel) {
+      saved.ticketChannelId = ticketChannel.id;
+      updateState(state => {
+        const item = state.applications.find(entry => entry.id === saved.id);
+        if (item) {
+          item.ticketChannelId = ticketChannel.id;
+        }
+      });
+    }
+
     await publishApplication(saved, previous);
     await interaction.reply({
-      content: 'Заявка отправлена. Ожидайте решения от состава рекрутинга.',
+      content: ticketChannel
+        ? `Заявка отправлена. Ваш тикет: <#${ticketChannel.id}>`
+        : 'Заявка отправлена. Ожидайте решения от состава рекрутинга.',
       ephemeral: true
     });
     return;
@@ -351,6 +373,61 @@ async function publishApplication(application, previous) {
       item.channelId = message.channel.id;
     }
   });
+}
+
+async function createTicketChannel(interaction, application, previous) {
+  const guild = interaction.guild || await fetchGuild();
+
+  if (!guild) {
+    console.warn('Guild not found, ticket channel was not created.');
+    return null;
+  }
+
+  const channelName = ticketChannelName(application);
+  const overwrites = [
+    {
+      id: guild.roles.everyone.id,
+      deny: [PermissionsBitField.Flags.ViewChannel]
+    },
+    {
+      id: application.userId,
+      allow: [
+        PermissionsBitField.Flags.ViewChannel,
+        PermissionsBitField.Flags.SendMessages,
+        PermissionsBitField.Flags.ReadMessageHistory
+      ]
+    },
+    ...[...new Set([...ADMIN_ROLE_IDS, ...RECRUITER_ROLE_IDS])].map(roleId => ({
+      id: roleId,
+      allow: [
+        PermissionsBitField.Flags.ViewChannel,
+        PermissionsBitField.Flags.SendMessages,
+        PermissionsBitField.Flags.ReadMessageHistory
+      ]
+    }))
+  ];
+
+  const channel = await guild.channels.create({
+    name: channelName,
+    type: ChannelType.GuildText,
+    parent: TICKET_CATEGORY_ID || undefined,
+    topic: `Заявка ${application.id} | Discord ID: ${application.userId}`,
+    permissionOverwrites: overwrites,
+    reason: `Recruit application ticket for ${application.userTag}`
+  });
+
+  await channel.send({
+    content: [
+      `<@${application.userId}>`,
+      recruiterMentions(),
+      '',
+      'Приветствую. Ваша заявка создана, ожидайте ответа рекрутера в этом канале.'
+    ].filter(Boolean).join('\n'),
+    embeds: [applicationEmbed(application, previous)],
+    components: applicationButtons(application)
+  });
+
+  return channel;
 }
 
 function updateApplication(id, patch, actor) {
@@ -410,24 +487,48 @@ function panelEmbed() {
   const embed = new EmbedBuilder()
     .setTitle(`${FAMILY_NAME} | Заявки в семью`)
     .setDescription([
-      'Путь в семью начинается здесь.',
+      '**Путь в семью начинается здесь.**',
       '',
-      'Заполните форму внимательно. После отправки заявка попадет на рассмотрение рекрутерам.',
-      'Если набор закрыт, бот не даст отправить новую заявку.',
+      'Заполните форму внимательно. После отправки бот создаст личный тикет, где заявку рассмотрит состав рекрутинга.',
+      '',
+      'Обычно заявка рассматривается по мере нагрузки рекрутеров. Если набор закрыт, бот не даст отправить новую заявку.',
       '',
       'Не указывайте пароли, токены и другую конфиденциальную информацию.'
     ].join('\n'))
-    .setColor(0xf59e0b);
+    .setColor(0xf59e0b)
+    .setFooter({ text: `${FAMILY_NAME} Recruiting` });
 
   if (PANEL_IMAGE_URL) {
     embed.setImage(PANEL_IMAGE_URL);
+  } else {
+    embed.setImage('attachment://reinhard-panel.gif');
   }
 
   if (BRAND_ICON_URL) {
     embed.setThumbnail(BRAND_ICON_URL);
+  } else {
+    embed.setThumbnail('attachment://reinhard-avatar.png');
   }
 
   return embed;
+}
+
+function panelFiles() {
+  if (PANEL_IMAGE_URL && BRAND_ICON_URL) {
+    return [];
+  }
+
+  const files = [];
+
+  if (!PANEL_IMAGE_URL) {
+    files.push(new AttachmentBuilder(LOCAL_PANEL_IMAGE, { name: 'reinhard-panel.gif' }));
+  }
+
+  if (!BRAND_ICON_URL) {
+    files.push(new AttachmentBuilder(LOCAL_BRAND_ICON, { name: 'reinhard-avatar.png' }));
+  }
+
+  return files;
 }
 
 function applicationModal() {
@@ -478,7 +579,8 @@ function applicationEmbed(application, previous = []) {
       { name: 'Username', value: application.username || '-', inline: true },
       { name: 'ID', value: application.userId, inline: true },
       { name: 'Статус', value: status.label, inline: true },
-      { name: 'Рекрутер', value: application.reviewerId ? `<@${application.reviewerId}>` : 'Не назначен', inline: true }
+      { name: 'Рекрутер', value: application.reviewerId ? `<@${application.reviewerId}>` : 'Не назначен', inline: true },
+      { name: 'Тикет', value: application.ticketChannelId ? `<#${application.ticketChannelId}>` : 'Не создан', inline: true }
     )
     .setFooter({ text: formatDateTime(application.createdAt) });
 
@@ -543,8 +645,7 @@ function historyEmbed(user, items) {
 }
 
 function applicationButtons(application) {
-  return [
-    new ActionRowBuilder().addComponents(
+  const buttons = [
       new ButtonBuilder()
         .setCustomId(`recruit:accept:${application.id}`)
         .setLabel('Принять')
@@ -561,8 +662,18 @@ function applicationButtons(application) {
         .setCustomId(`recruit:reject:${application.id}`)
         .setLabel('Отклонить')
         .setStyle(ButtonStyle.Danger)
-    )
   ];
+
+  if (application.ticketChannelId) {
+    buttons.push(
+      new ButtonBuilder()
+        .setLabel('Открыть тикет')
+        .setStyle(ButtonStyle.Link)
+        .setURL(discordChannelUrl(application.ticketChannelId))
+    );
+  }
+
+  return [new ActionRowBuilder().addComponents(...buttons)];
 }
 
 function statusMeta(status) {
@@ -626,6 +737,49 @@ async function fetchChannel(id) {
   } catch {
     return null;
   }
+}
+
+async function fetchGuild() {
+  if (!GUILD_ID) {
+    return client.guilds.cache.first() || null;
+  }
+
+  try {
+    return await client.guilds.fetch(GUILD_ID);
+  } catch {
+    return null;
+  }
+}
+
+function ticketChannelName(application) {
+  const prefix = TICKET_NAME_PREFIX
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{N}-]/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'ticket';
+  const name = sanitizeChannelPart(application.username || application.userTag || application.userId);
+
+  return `${prefix}-${name}`;
+}
+
+function discordChannelUrl(channelId) {
+  const guildId = GUILD_ID || '@me';
+  return `https://discord.com/channels/${guildId}/${channelId}`;
+}
+
+function sanitizeChannelPart(value) {
+  const clean = String(value || '')
+    .toLowerCase()
+    .replace(/#\d+$/, '')
+    .replace(/\s+/g, '-')
+    .replace(/_/g, '-')
+    .replace(/[^\p{L}\p{N}-]/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+
+  return clean || 'user';
 }
 
 function countStatuses(applications) {
