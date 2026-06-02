@@ -57,10 +57,15 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
+startHttpApi();
+
 client.once('ready', async () => {
   console.log(`ReinhardBot logged in as ${client.user.tag}`);
-  await registerCommands();
-  startHttpApi();
+  try {
+    await registerCommands();
+  } catch (error) {
+    console.error('Failed to register Discord commands.', error);
+  }
 });
 
 client.on('interactionCreate', async interaction => {
@@ -87,7 +92,9 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-client.login(TOKEN);
+client.login(TOKEN).catch(error => {
+  console.error('Discord login failed.', error);
+});
 
 async function registerCommands() {
   const commands = [
@@ -292,8 +299,10 @@ async function handleButton(interaction) {
     reviewerTag: interaction.user.tag
   }, interaction.user);
 
+  await syncCallChannelAccess(updated);
   await updateApplicationMessage(interaction, updated);
   await sendResultIfNeeded(interaction, updated);
+  await sendApplicationDm(updated);
   await interaction.reply({
     content: statusReplyText(nextStatus, updated),
     ephemeral: true
@@ -373,8 +382,10 @@ async function handleModal(interaction) {
       reason
     }, interaction.user);
 
+    await syncCallChannelAccess(updated);
     await updateApplicationMessage(interaction, updated);
     await sendResultIfNeeded(interaction, updated);
+    await sendApplicationDm(updated);
     await interaction.reply({
       content: 'Заявка отклонена, результат записан в логи.',
       ephemeral: true
@@ -550,7 +561,7 @@ async function updateApplicationMessage(interaction, application) {
 }
 
 async function sendResultIfNeeded(interaction, application) {
-  if (!['call', 'accepted', 'rejected'].includes(application.status)) {
+  if (!['accepted', 'rejected'].includes(application.status)) {
     return;
   }
 
@@ -563,6 +574,48 @@ async function sendResultIfNeeded(interaction, application) {
     content: `<@${application.userId}>`,
     embeds: [resultEmbed(application)]
   });
+}
+
+async function sendApplicationDm(application) {
+  if (!['review', 'call', 'accepted', 'rejected'].includes(application.status)) {
+    return;
+  }
+
+  try {
+    const user = await client.users.fetch(application.userId);
+    await user.send({ embeds: [applicationDmEmbed(application)] });
+  } catch (error) {
+    console.warn(`Failed to send DM to ${application.userTag || application.userId}.`, error);
+  }
+}
+
+async function syncCallChannelAccess(application) {
+  if (!CALL_CHANNEL_ID) {
+    return;
+  }
+
+  const channel = await fetchChannel(CALL_CHANNEL_ID);
+  if (!channel) {
+    console.warn(`CALL_CHANNEL_ID is set, but channel was not found: ${CALL_CHANNEL_ID}`);
+    return;
+  }
+
+  try {
+    if (application.status === 'call') {
+      await channel.permissionOverwrites.edit(application.userId, {
+        ViewChannel: true,
+        Connect: true,
+        Speak: true
+      }, { reason: `Call access for ${application.userTag}` });
+      return;
+    }
+
+    if (['accepted', 'rejected'].includes(application.status)) {
+      await channel.permissionOverwrites.delete(application.userId, `Remove call access for ${application.userTag}`);
+    }
+  } catch (error) {
+    console.error('Failed to sync call channel access.', error);
+  }
 }
 
 function panelEmbeds(includeLocalFiles = true) {
@@ -667,22 +720,42 @@ function applicationEmbed(application, previous = []) {
     .setTitle(`${FAMILY_NAME} | Заявка в семью`)
     .setColor(status.color)
     .setDescription([
-      previous.length ? `Предыдущие заявки: ${previous.length}` : 'Предыдущие заявки: не найдено',
+      `**${status.label}**`,
       '',
-      `Статус: **${status.label}**`
-    ].join('\n'))
+      `Кандидат: <@${application.userId}>`,
+      application.reviewerId ? `Рекрутер: <@${application.reviewerId}>` : 'Рекрутер: не назначен',
+      previous.length ? `История: ${previous.length} пред. заявк.` : 'История: чисто'
+    ].filter(Boolean).join('\n'))
     .addFields(
-      { name: 'Ник в игре; возраст(OOC); имя (OOC)', value: crop(application.answers.profile), inline: false },
-      { name: 'В каких семьях был(-а), почему ушел', value: crop(application.answers.previousFamilies), inline: false },
-      { name: 'Сколько часов на GTA5RP', value: crop(application.answers.hours), inline: false },
-      { name: 'Гос и Крайм', value: crop(application.answers.readiness), inline: false },
-      { name: 'Пользователь', value: `<@${application.userId}>`, inline: true },
-      { name: 'Username', value: application.username || '-', inline: true },
-      { name: 'ID', value: application.userId, inline: true },
-      { name: 'Рекрутер', value: application.reviewerId ? `<@${application.reviewerId}>` : 'Не назначен', inline: true },
-      { name: 'Тикет', value: application.ticketChannelId ? `<#${application.ticketChannelId}>` : 'Не создан', inline: true }
+      {
+        name: 'Профиль',
+        value: [
+          `Username: **${application.username || '-'}**`,
+          `Discord ID: \`${application.userId}\``,
+          application.ticketChannelId ? `Тикет: <#${application.ticketChannelId}>` : ''
+        ].filter(Boolean).join('\n'),
+        inline: false
+      },
+      {
+        name: 'Ник / возраст / имя',
+        value: crop(application.answers.profile, 350),
+        inline: false
+      },
+      {
+        name: 'Опыт в семьях',
+        value: crop(application.answers.previousFamilies, 500),
+        inline: false
+      },
+      {
+        name: 'GTA5RP',
+        value: [
+          `Часы: **${crop(application.answers.hours, 180)}**`,
+          `Гос и Крайм: **${crop(application.answers.readiness, 250)}**`
+        ].join('\n'),
+        inline: false
+      }
     )
-    .setFooter({ text: formatDateTime(application.createdAt) });
+    .setFooter({ text: `Создано: ${formatDateTime(application.createdAt)}` });
 
   if (application.reason) {
     embed.addFields({ name: 'Причина', value: crop(application.reason), inline: false });
@@ -697,40 +770,49 @@ function applicationEmbed(application, previous = []) {
 
 function applicationLogEmbed(application, previous = []) {
   const status = statusMeta(application.status);
-  const lines = [
-    `Кандидат: <@${application.userId}>`,
-    `Username: **${application.username || '-'}**`,
-    `Discord ID: \`${application.userId}\``,
-    application.ticketChannelId ? `Тикет: <#${application.ticketChannelId}>` : '',
-    `Предыдущие заявки: **${previous.length || 'не найдено'}**`
-  ].filter(Boolean);
 
   return new EmbedBuilder()
     .setTitle(`${FAMILY_NAME} | Новая заявка`)
-    .setDescription(lines.join('\n'))
+    .setDescription('Создан приватный тикет для обработки кандидата.')
     .setColor(status.color)
-    .setFooter({ text: formatDateTime(application.createdAt) });
+    .addFields(
+      {
+        name: 'Кандидат',
+        value: [
+          `<@${application.userId}>`,
+          `Username: **${application.username || '-'}**`
+        ].join('\n'),
+        inline: true
+      },
+      {
+        name: 'Тикет',
+        value: application.ticketChannelId ? `<#${application.ticketChannelId}>` : 'Не создан',
+        inline: true
+      },
+      {
+        name: 'История',
+        value: previous.length ? `${previous.length} пред. заявк.` : 'Не найдено',
+        inline: true
+      }
+    )
+    .setFooter({ text: `${FAMILY_NAME} • ${formatDateTime(application.createdAt)}` });
 }
 
 function resultEmbed(application) {
   const status = statusMeta(application.status);
   const lines = {
-    call: [
-      'Ваша заявка рассмотрена и предварительно одобрена.',
-      CALL_CHANNEL_ID ? `Для прохождения обзвона ожидаем вас в канале: <#${CALL_CHANNEL_ID}>` : 'Ожидайте указаний по обзвону.'
-    ],
     accepted: [
-      `Ваша заявка на вступление в ${FAMILY_NAME} была одобрена.`,
-      'Ожидайте дальнейших действий от состава семьи.'
+      `Заявка пользователя <@${application.userId}> была одобрена.`,
+      'Кандидат принят в семью.'
     ],
     rejected: [
-      `Ваша заявка на вступление в ${FAMILY_NAME} была отклонена.`,
+      `Заявка пользователя <@${application.userId}> была отклонена.`,
       `Причина: ${application.reason || 'не указана.'}`
     ]
   }[application.status] || ['Статус заявки обновлен.'];
 
   return new EmbedBuilder()
-    .setTitle(`${FAMILY_NAME} | Результат заявки`)
+    .setTitle(application.status === 'accepted' ? `${FAMILY_NAME} | Заявка одобрена` : `${FAMILY_NAME} | Заявка отклонена`)
     .setDescription(lines.join('\n'))
     .setColor(status.color)
     .addFields(
@@ -738,6 +820,59 @@ function resultEmbed(application) {
       { name: 'Рассматривал', value: application.reviewerId ? `<@${application.reviewerId}>` : '-', inline: true }
     )
     .setTimestamp(new Date());
+}
+
+function applicationDmEmbed(application) {
+  const status = statusMeta(application.status);
+  const data = {
+    review: {
+      title: `${FAMILY_NAME} | Заявка на рассмотрении`,
+      lead: 'Ваша заявка взята в работу рекрутером.',
+      body: 'Ожидайте дальнейшего ответа в личном тикете. Если потребуется уточнение, рекрутер напишет там.'
+    },
+    call: {
+      title: `${FAMILY_NAME} | Вызов на обзвон`,
+      lead: 'Ваша заявка предварительно одобрена.',
+      body: CALL_CHANNEL_ID
+        ? `Вам выдан доступ к voice-каналу: <#${CALL_CHANNEL_ID}>. Зайдите туда, когда будете готовы пройти обзвон.`
+        : 'Ожидайте рекрутера в тикете: канал обзвона пока не указан.'
+    },
+    accepted: {
+      title: `${FAMILY_NAME} | Заявка одобрена`,
+      lead: 'Поздравляем, ваша заявка принята.',
+      body: 'Ожидайте дальнейших действий от состава семьи.'
+    },
+    rejected: {
+      title: `${FAMILY_NAME} | Заявка отклонена`,
+      lead: 'По вашей заявке принято отрицательное решение.',
+      body: `Причина: ${application.reason || 'не указана.'}`
+    }
+  }[application.status] || {
+    title: `${FAMILY_NAME} | Статус заявки`,
+    lead: 'Статус вашей заявки обновлен.',
+    body: status.label
+  };
+
+  const embed = new EmbedBuilder()
+    .setTitle(data.title)
+    .setDescription([
+      `**${data.lead}**`,
+      '',
+      data.body
+    ].join('\n'))
+    .setColor(status.color)
+    .addFields(
+      { name: 'Статус', value: status.label, inline: true },
+      { name: 'Рекрутер', value: application.reviewerId ? `<@${application.reviewerId}>` : '-', inline: true },
+      { name: 'Тикет', value: application.ticketChannelId ? `<#${application.ticketChannelId}>` : '-', inline: false }
+    )
+    .setFooter({ text: `${FAMILY_NAME} • ${formatDateTime(new Date().toISOString())}` });
+
+  if (BRAND_ICON_URL) {
+    embed.setThumbnail(BRAND_ICON_URL);
+  }
+
+  return embed;
 }
 
 function historyEmbed(user, items) {
@@ -803,9 +938,9 @@ function closeTicketButton(application) {
 
 function statusMeta(status) {
   return {
-    new: { label: 'Ожидает рассмотрения', color: 0xf59e0b },
-    review: { label: 'На рассмотрении', color: 0x6366f1 },
-    call: { label: 'Вызван на обзвон', color: 0x22c55e },
+    new: { label: 'Ожидает рассмотрения', color: 0x991b1b },
+    review: { label: 'На рассмотрении', color: 0xb91c1c },
+    call: { label: 'Вызван на обзвон', color: 0xdc2626 },
     accepted: { label: 'Принят', color: 0x10b981 },
     rejected: { label: 'Отклонен', color: 0xef4444 }
   }[status] || { label: status || 'Неизвестно', color: 0x94a3b8 };
@@ -817,7 +952,9 @@ function statusReplyText(status, application) {
   }
 
   if (status === 'call') {
-    return `Кандидат вызван на обзвон: <@${application.userId}>.`;
+    return CALL_CHANNEL_ID
+      ? `Кандидат вызван на обзвон: <@${application.userId}>. Доступ к <#${CALL_CHANNEL_ID}> выдан.`
+      : `Кандидат вызван на обзвон: <@${application.userId}>. CALL_CHANNEL_ID не указан.`;
   }
 
   if (status === 'accepted') {
