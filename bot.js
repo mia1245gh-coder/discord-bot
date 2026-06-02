@@ -42,6 +42,66 @@ const FAMILY_NAME = process.env.FAMILY_NAME || 'Reinhard';
 const TICKET_NAME_PREFIX = process.env.TICKET_NAME_PREFIX || 'тикет';
 const RECRUITER_ROLE_IDS = splitIds(process.env.RECRUITER_ROLE_IDS);
 const ADMIN_ROLE_IDS = splitIds(process.env.ADMIN_ROLE_IDS);
+const RECRUIT_TEMPLATES = [
+  {
+    value: 'call_invite',
+    label: '01 | Приглашение на обзвон',
+    description: 'Предварительное одобрение заявки',
+    text: () => [
+      'Приветствую.',
+      '',
+      'Ваша заявка была рассмотрена и предварительно одобрена.',
+      'Когда вам будет удобно пройти обзвон?'
+    ].join('\n')
+  },
+  {
+    value: 'call_time',
+    label: '02 | Уточнение времени',
+    description: 'Уточнить удобное время сегодня',
+    text: () => 'Уточните, пожалуйста, в какое время сегодня вы будете готовы пройти обзвон.'
+  },
+  {
+    value: 'bad_answer',
+    label: '03 | Некорректный ответ',
+    description: 'Открывает поле для пункта заявки',
+    editable: true
+  },
+  {
+    value: 'reject_note',
+    label: '04 | Заявка отклонена',
+    description: 'Текст с причиной отказа',
+    text: () => [
+      'Приветствую.',
+      '',
+      'Ваша заявка была отклонена.',
+      'Причина: [указать причину].',
+      '',
+      'Вы сможете подать новую заявку после исправления указанных недочетов.'
+    ].join('\n')
+  },
+  {
+    value: 'no_show',
+    label: '05 | Не вышел на связь',
+    description: 'Кандидат не пришел на обзвон',
+    text: () => [
+      'Приветствую.',
+      '',
+      'Вы не вышли на связь для прохождения обзвона.',
+      'Если вы всё еще заинтересованы во вступлении, сообщите актуальное время, когда сможете пройти обзвон.'
+    ].join('\n')
+  },
+  {
+    value: 'call_passed',
+    label: '06 | Успешный обзвон',
+    description: 'Кандидат прошел обзвон',
+    text: ({ actor }) => [
+      'Приветствую.',
+      '',
+      'Вы успешно прошли обзвон.',
+      `Ожидайте дальнейших кординаций от <@${actor.id}>`
+    ].join('\n')
+  }
+];
 
 if (!TOKEN) {
   console.error('DISCORD_TOKEN is missing. Create .env or Railway variables.');
@@ -258,6 +318,16 @@ async function handleButton(interaction) {
     return;
   }
 
+  if (interaction.customId.startsWith('recruit:template-select:')) {
+    await handleTemplateSelect(interaction);
+    return;
+  }
+
+  if (interaction.customId.startsWith('recruit:templates:')) {
+    await showTemplateMenu(interaction);
+    return;
+  }
+
   if (interaction.customId.startsWith('recruit:close-ticket:')) {
     await closeTicket(interaction);
     return;
@@ -307,6 +377,101 @@ async function handleButton(interaction) {
     content: statusReplyText(nextStatus, updated),
     ephemeral: true
   });
+}
+
+async function showTemplateMenu(interaction) {
+  if (!canReviewApplications(interaction.member)) {
+    await interaction.reply({ content: 'Нет доступа к шаблонам рекрутинга.', ephemeral: true });
+    return;
+  }
+
+  const applicationId = interaction.customId.replace('recruit:templates:', '');
+  const application = findApplicationInTicket(applicationId, interaction.channelId);
+
+  if (!application) {
+    await interaction.reply({ content: 'Шаблоны можно отправлять только в тикете заявки.', ephemeral: true });
+    return;
+  }
+
+  await interaction.reply({
+    content: 'Выберите готовый текст. Его увидит кандидат в этом тикете.',
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`recruit:template-select:${application.id}`)
+        .setPlaceholder('Готовые ответы рекрута')
+        .addOptions(...RECRUIT_TEMPLATES.map(template => ({
+          label: template.label,
+          value: template.value,
+          description: template.description
+        })))
+    )],
+    ephemeral: true
+  });
+}
+
+async function handleTemplateSelect(interaction) {
+  if (!canReviewApplications(interaction.member)) {
+    await interaction.reply({ content: 'Нет доступа к шаблонам рекрутинга.', ephemeral: true });
+    return;
+  }
+
+  const applicationId = interaction.customId.replace('recruit:template-select:', '');
+  const application = findApplicationInTicket(applicationId, interaction.channelId);
+  const template = RECRUIT_TEMPLATES.find(item => item.value === interaction.values?.[0]);
+
+  if (!application || !template) {
+    await interaction.update({ content: 'Шаблон или тикет не найден.', components: [] });
+    return;
+  }
+
+  if (template.editable) {
+    await interaction.showModal(templateAnswerModal(application.id));
+    return;
+  }
+
+  await interaction.channel.send(recruitTemplateText(template, application, interaction.user));
+  await interaction.update({ content: 'Текст отправлен в тикет.', components: [] });
+}
+
+async function handleTemplateAnswerModal(interaction) {
+  if (!canReviewApplications(interaction.member)) {
+    await interaction.reply({ content: 'Нет доступа к шаблонам рекрутинга.', ephemeral: true });
+    return;
+  }
+
+  const applicationId = interaction.customId.replace('recruit:template-answer:', '');
+  const application = findApplicationInTicket(applicationId, interaction.channelId);
+
+  if (!application) {
+    await interaction.reply({ content: 'Тикет заявки не найден.', ephemeral: true });
+    return;
+  }
+
+  const point = fieldValue(interaction, 'templatePoint') || '[условно возвраст]';
+  await interaction.channel.send(recruitTemplateText({
+    text: () => [
+      'В вашей заявке обнаружен некорректный, неполный либо отсутствует ответ в пункте: ' + point + '.',
+      'Пожалуйста, исправьте его для дальнейшего рассмотрения.'
+    ].join('\n')
+  }, application, interaction.user));
+  await interaction.reply({ content: 'Текст отправлен в тикет.', ephemeral: true });
+}
+
+function findApplicationInTicket(applicationId, channelId) {
+  return readState().applications.find(item =>
+    item.id === applicationId &&
+    item.ticketChannelId === channelId
+  );
+}
+
+function recruitTemplateText(template, application, actor) {
+  return {
+    content: `<@${application.userId}>`,
+    allowedMentions: { users: [application.userId, actor.id], roles: [] },
+    embeds: [new EmbedBuilder()
+      .setDescription(template.text({ application, actor }))
+      .setColor(0x2dd4bf)]
+  };
 }
 
 async function handleModal(interaction) {
@@ -364,6 +529,11 @@ async function handleModal(interaction) {
         : 'Заявка отправлена. Ожидайте решения от состава рекрутинга.',
       ephemeral: true
     });
+    return;
+  }
+
+  if (interaction.customId.startsWith('recruit:template-answer:')) {
+    await handleTemplateAnswerModal(interaction);
     return;
   }
 
@@ -651,6 +821,15 @@ function rejectModal(applicationId) {
     );
 }
 
+function templateAnswerModal(applicationId) {
+  return new ModalBuilder()
+    .setCustomId(`recruit:template-answer:${applicationId}`)
+    .setTitle('Некорректный ответ')
+    .addComponents(
+      inputRow('templatePoint', 'Какой пункт нужно исправить?', TextInputStyle.Short, 'Например: возраст / опыт в семьях')
+    );
+}
+
 function inputRow(customId, label, style, placeholder) {
   return new ActionRowBuilder().addComponents(
     new TextInputBuilder()
@@ -857,12 +1036,20 @@ function applicationButtons(application) {
     buttons.push(closeTicketButton(application));
   }
 
-  return [new ActionRowBuilder().addComponents(...buttons)];
+  const rows = [new ActionRowBuilder().addComponents(...buttons)];
+  if (application.ticketChannelId) {
+    rows.push(templateButtonRow(application));
+  }
+
+  return rows;
 }
 
 function ticketCloseComponents(application) {
   return application.ticketChannelId
-    ? [new ActionRowBuilder().addComponents(closeTicketButton(application))]
+    ? [
+      new ActionRowBuilder().addComponents(closeTicketButton(application)),
+      templateButtonRow(application)
+    ]
     : [];
 }
 
@@ -871,6 +1058,15 @@ function closeTicketButton(application) {
     .setCustomId(`recruit:close-ticket:${application.id}`)
     .setLabel('Закрыть тикет')
     .setStyle(ButtonStyle.Secondary);
+}
+
+function templateButtonRow(application) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`recruit:templates:${application.id}`)
+      .setLabel('Шаблоны')
+      .setStyle(ButtonStyle.Secondary)
+  );
 }
 
 function statusMeta(status) {
