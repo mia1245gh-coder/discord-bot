@@ -323,6 +323,11 @@ async function handleButton(interaction) {
     return;
   }
 
+  if (interaction.customId.startsWith('recruit:template:')) {
+    await handleTemplateButton(interaction);
+    return;
+  }
+
   if (interaction.customId.startsWith('recruit:templates:')) {
     await showTemplateMenu(interaction);
     return;
@@ -395,18 +400,33 @@ async function showTemplateMenu(interaction) {
 
   await interaction.reply({
     content: 'Выберите готовый текст. Его увидит кандидат в этом тикете.',
-    components: [new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId(`recruit:template-select:${application.id}`)
-        .setPlaceholder('Готовые ответы рекрута')
-        .addOptions(...RECRUIT_TEMPLATES.map(template => ({
-          label: template.label,
-          value: template.value,
-          description: template.description
-        })))
-    )],
+    components: templateMenuRows(application),
     ephemeral: true
   });
+}
+
+async function handleTemplateButton(interaction) {
+  if (!canReviewApplications(interaction.member)) {
+    await interaction.reply({ content: 'Нет доступа к шаблонам рекрутинга.', ephemeral: true });
+    return;
+  }
+
+  const [, , applicationId, templateValue] = interaction.customId.split(':');
+  const application = findApplicationInTicket(applicationId, interaction.channelId);
+  const template = RECRUIT_TEMPLATES.find(item => item.value === templateValue);
+
+  if (!application || !template) {
+    await interaction.reply({ content: 'Шаблон или тикет не найден.', ephemeral: true });
+    return;
+  }
+
+  if (template.editable) {
+    await interaction.showModal(templateAnswerModal(application.id));
+    return;
+  }
+
+  await interaction.channel.send(recruitTemplateText(template, application, interaction.user));
+  await interaction.reply({ content: 'Текст отправлен в тикет.', ephemeral: true });
 }
 
 async function handleTemplateSelect(interaction) {
@@ -467,7 +487,6 @@ function findApplicationInTicket(applicationId, channelId) {
 function recruitTemplateText(template, application, actor) {
   return {
     content: `<@${application.userId}>`,
-    allowedMentions: { users: [application.userId, actor.id], roles: [] },
     embeds: [new EmbedBuilder()
       .setDescription(template.text({ application, actor }))
       .setColor(0x2dd4bf)]
@@ -1067,6 +1086,20 @@ function templateButtonRow(application) {
       .setLabel('Шаблоны')
       .setStyle(ButtonStyle.Secondary)
   );
+}
+
+function templateMenuRows(application) {
+  const buttons = RECRUIT_TEMPLATES.map((template, index) =>
+    new ButtonBuilder()
+      .setCustomId(`recruit:template:${application.id}:${template.value}`)
+      .setLabel(`${String(index + 1).padStart(2, '0')} ${template.label.split('|')[1].trim()}`)
+      .setStyle(template.editable ? ButtonStyle.Primary : ButtonStyle.Secondary)
+  );
+
+  return [
+    new ActionRowBuilder().addComponents(...buttons.slice(0, 3)),
+    new ActionRowBuilder().addComponents(...buttons.slice(3))
+  ];
 }
 
 function statusMeta(status) {
