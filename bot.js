@@ -450,7 +450,6 @@ async function publishApplication(application, previous) {
   }
 
   await channel.send({
-    content: recruiterMentions(),
     embeds: [applicationLogEmbed(application, previous)]
   });
 }
@@ -497,12 +496,6 @@ async function createTicketChannel(interaction, application, previous) {
   });
 
   const message = await channel.send({
-    content: [
-      `<@${application.userId}>`,
-      recruiterMentions(),
-      '',
-      'Приветствую. Ваша заявка создана, ожидайте ответа рекрутера в этом канале.'
-    ].filter(Boolean).join('\n'),
     embeds: [applicationEmbed(application, previous)],
     components: applicationButtons(application)
   });
@@ -571,7 +564,6 @@ async function sendResultIfNeeded(interaction, application) {
   }
 
   await channel.send({
-    content: `<@${application.userId}>`,
     embeds: [resultEmbed(application)]
   });
 }
@@ -716,49 +708,41 @@ function inputRow(customId, label, style, placeholder) {
 
 function applicationEmbed(application, previous = []) {
   const status = statusMeta(application.status);
+  const lead = {
+    new: 'Заявка кандидата создана и ожидает обработки.',
+    review: 'Заявка взята в работу рекрутером.',
+    call: CALL_CHANNEL_ID
+      ? `Кандидат вызван на обзвон. Доступ к <#${CALL_CHANNEL_ID}> выдан.`
+      : 'Кандидат вызван на обзвон. Канал обзвона пока не указан.',
+    accepted: 'Заявка одобрена. Кандидат принят в семью.',
+    rejected: 'Заявка отклонена. Решение записано в журнал.'
+  }[application.status] || 'Статус заявки обновлен.';
+  const statusLine = [
+    `• Статус: **${status.label}**`,
+    `• Кандидат: <@${application.userId}>`,
+    application.reviewerId ? `• Рекрутер: <@${application.reviewerId}>` : '• Рекрутер: ожидает назначения',
+    previous.length ? `• История: ${previous.length} пред. заявк.` : '• История: заявок не найдено'
+  ].join('\n');
+
   const embed = new EmbedBuilder()
-    .setTitle(`${FAMILY_NAME} | Заявка в семью`)
+    .setTitle('Путь в семью начинается здесь')
     .setColor(status.color)
     .setDescription([
-      `**${status.label}**`,
+      `**${lead}**`,
       '',
-      `Кандидат: <@${application.userId}>`,
-      application.reviewerId ? `Рекрутер: <@${application.reviewerId}>` : 'Рекрутер: не назначен',
-      previous.length ? `История: ${previous.length} пред. заявк.` : 'История: чисто'
-    ].filter(Boolean).join('\n'))
-    .addFields(
-      {
-        name: 'Профиль',
-        value: [
-          `Username: **${application.username || '-'}**`,
-          `Discord ID: \`${application.userId}\``,
-          application.ticketChannelId ? `Тикет: <#${application.ticketChannelId}>` : ''
-        ].filter(Boolean).join('\n'),
-        inline: false
-      },
-      {
-        name: 'Ник / возраст / имя',
-        value: crop(application.answers.profile, 350),
-        inline: false
-      },
-      {
-        name: 'Опыт в семьях',
-        value: crop(application.answers.previousFamilies, 500),
-        inline: false
-      },
-      {
-        name: 'GTA5RP',
-        value: [
-          `Часы: **${crop(application.answers.hours, 180)}**`,
-          `Гос и Крайм: **${crop(application.answers.readiness, 250)}**`
-        ].join('\n'),
-        inline: false
-      }
-    )
-    .setFooter({ text: `Создано: ${formatDateTime(application.createdAt)}` });
+      statusLine,
+      '',
+      '**Анкета**',
+      `Ник / возраст / имя:\n${crop(application.answers.profile, 350)}`,
+      '',
+      `Опыт в семьях:\n${crop(application.answers.previousFamilies, 500)}`,
+      '',
+      `GTA5RP:\n• Часы: **${crop(application.answers.hours, 180)}**\n• Гос и Крайм: **${crop(application.answers.readiness, 250)}**`
+    ].join('\n'))
+    .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(application.createdAt)}` });
 
   if (application.reason) {
-    embed.addFields({ name: 'Причина', value: crop(application.reason), inline: false });
+    embed.addFields({ name: 'Причина решения', value: crop(application.reason), inline: false });
   }
 
   if (BRAND_ICON_URL) {
@@ -772,83 +756,75 @@ function applicationLogEmbed(application, previous = []) {
   const status = statusMeta(application.status);
 
   return new EmbedBuilder()
-    .setTitle(`${FAMILY_NAME} | Новая заявка`)
-    .setDescription('Создан приватный тикет для обработки кандидата.')
+    .setTitle('Новая заявка в семью')
+    .setDescription([
+      '**Создан приватный тикет для обработки кандидата.**',
+      '',
+      `• Кандидат: <@${application.userId}>`,
+      `• Username: **${application.username || '-'}**`,
+      application.ticketChannelId ? `• Тикет: <#${application.ticketChannelId}>` : '',
+      previous.length ? `• История: ${previous.length} пред. заявк.` : '• История: заявок не найдено'
+    ].filter(Boolean).join('\n'))
     .setColor(status.color)
-    .addFields(
-      {
-        name: 'Кандидат',
-        value: [
-          `<@${application.userId}>`,
-          `Username: **${application.username || '-'}**`
-        ].join('\n'),
-        inline: true
-      },
-      {
-        name: 'Тикет',
-        value: application.ticketChannelId ? `<#${application.ticketChannelId}>` : 'Не создан',
-        inline: true
-      },
-      {
-        name: 'История',
-        value: previous.length ? `${previous.length} пред. заявк.` : 'Не найдено',
-        inline: true
-      }
-    )
-    .setFooter({ text: `${FAMILY_NAME} • ${formatDateTime(application.createdAt)}` });
+    .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(application.createdAt)}` });
 }
 
 function resultEmbed(application) {
   const status = statusMeta(application.status);
-  const lines = {
+  const data = {
     accepted: [
-      `Заявка пользователя <@${application.userId}> была одобрена.`,
-      'Кандидат принят в семью.'
+      'Заявка одобрена',
+      '**Кандидат принят в семью.**',
+      `• Кандидат: <@${application.userId}>`,
+      application.reviewerId ? `• Рассматривал: <@${application.reviewerId}>` : '',
+      '• Решение записано в журнал заявок.'
     ],
     rejected: [
-      `Заявка пользователя <@${application.userId}> была отклонена.`,
-      `Причина: ${application.reason || 'не указана.'}`
+      'Заявка отклонена',
+      '**По заявке принято отрицательное решение.**',
+      `• Кандидат: <@${application.userId}>`,
+      application.reviewerId ? `• Рассматривал: <@${application.reviewerId}>` : '',
+      `• Причина: ${application.reason || 'не указана.'}`
     ]
-  }[application.status] || ['Статус заявки обновлен.'];
+  }[application.status] || [
+    'Статус заявки',
+    '**Статус заявки обновлен.**'
+  ];
 
   return new EmbedBuilder()
-    .setTitle(application.status === 'accepted' ? `${FAMILY_NAME} | Заявка одобрена` : `${FAMILY_NAME} | Заявка отклонена`)
-    .setDescription(lines.join('\n'))
+    .setTitle(data[0])
+    .setDescription(data.slice(1).filter(Boolean).join('\n'))
     .setColor(status.color)
-    .addFields(
-      { name: 'Кандидат', value: `<@${application.userId}>`, inline: true },
-      { name: 'Рассматривал', value: application.reviewerId ? `<@${application.reviewerId}>` : '-', inline: true }
-    )
-    .setTimestamp(new Date());
+    .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(new Date().toISOString())}` });
 }
 
 function applicationDmEmbed(application) {
   const status = statusMeta(application.status);
   const data = {
     review: {
-      title: `${FAMILY_NAME} | Заявка на рассмотрении`,
+      title: 'Заявка на рассмотрении',
       lead: 'Ваша заявка взята в работу рекрутером.',
       body: 'Ожидайте дальнейшего ответа в личном тикете. Если потребуется уточнение, рекрутер напишет там.'
     },
     call: {
-      title: `${FAMILY_NAME} | Вызов на обзвон`,
+      title: 'Вызов на обзвон',
       lead: 'Ваша заявка предварительно одобрена.',
       body: CALL_CHANNEL_ID
         ? `Вам выдан доступ к voice-каналу: <#${CALL_CHANNEL_ID}>. Зайдите туда, когда будете готовы пройти обзвон.`
         : 'Ожидайте рекрутера в тикете: канал обзвона пока не указан.'
     },
     accepted: {
-      title: `${FAMILY_NAME} | Заявка одобрена`,
+      title: 'Заявка одобрена',
       lead: 'Поздравляем, ваша заявка принята.',
       body: 'Ожидайте дальнейших действий от состава семьи.'
     },
     rejected: {
-      title: `${FAMILY_NAME} | Заявка отклонена`,
+      title: 'Заявка отклонена',
       lead: 'По вашей заявке принято отрицательное решение.',
       body: `Причина: ${application.reason || 'не указана.'}`
     }
   }[application.status] || {
-    title: `${FAMILY_NAME} | Статус заявки`,
+    title: 'Статус заявки',
     lead: 'Статус вашей заявки обновлен.',
     body: status.label
   };
@@ -858,15 +834,14 @@ function applicationDmEmbed(application) {
     .setDescription([
       `**${data.lead}**`,
       '',
-      data.body
-    ].join('\n'))
+      data.body,
+      '',
+      `• Статус: **${status.label}**`,
+      application.reviewerId ? `• Рекрутер: <@${application.reviewerId}>` : '',
+      application.ticketChannelId ? `• Тикет: <#${application.ticketChannelId}>` : ''
+    ].filter(Boolean).join('\n'))
     .setColor(status.color)
-    .addFields(
-      { name: 'Статус', value: status.label, inline: true },
-      { name: 'Рекрутер', value: application.reviewerId ? `<@${application.reviewerId}>` : '-', inline: true },
-      { name: 'Тикет', value: application.ticketChannelId ? `<#${application.ticketChannelId}>` : '-', inline: false }
-    )
-    .setFooter({ text: `${FAMILY_NAME} • ${formatDateTime(new Date().toISOString())}` });
+    .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(new Date().toISOString())}` });
 
   if (BRAND_ICON_URL) {
     embed.setThumbnail(BRAND_ICON_URL);
