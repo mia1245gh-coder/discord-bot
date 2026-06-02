@@ -708,38 +708,33 @@ function inputRow(customId, label, style, placeholder) {
 
 function applicationEmbed(application, previous = []) {
   const status = statusMeta(application.status);
-  const lead = {
-    new: 'Заявка кандидата создана и ожидает обработки.',
-    review: 'Заявка взята в работу рекрутером.',
-    call: CALL_CHANNEL_ID
-      ? `Кандидат вызван на обзвон. Доступ к <#${CALL_CHANNEL_ID}> выдан.`
-      : 'Кандидат вызван на обзвон. Канал обзвона пока не указан.',
-    accepted: 'Заявка одобрена. Кандидат принят в семью.',
-    rejected: 'Заявка отклонена. Решение записано в журнал.'
-  }[application.status] || 'Статус заявки обновлен.';
-  const statusLine = [
-    `• Статус: **${status.label}**`,
-    `• Кандидат: <@${application.userId}>`,
-    application.reviewerId ? `• Рекрутер: <@${application.reviewerId}>` : '• Рекрутер: ожидает назначения',
-    previous.length ? `• История: ${previous.length} пред. заявк.` : '• История: заявок не найдено'
-  ].join('\n');
-
   const embed = new EmbedBuilder()
-    .setTitle('Путь в семью начинается здесь')
+    .setTitle('Заявление')
     .setColor(status.color)
     .setDescription([
-      `**${lead}**`,
+      previous.length ? `Предыдущие заявки: ${previous.length}` : 'Предыдущие заявки: не найдено',
       '',
-      statusLine,
+      `Статус: **${status.label}**`,
+      application.reviewerId ? `Рекрутер: <@${application.reviewerId}>` : 'Рекрутер: не назначен',
       '',
-      '**Анкета**',
-      `Ник / возраст / имя:\n${crop(application.answers.profile, 350)}`,
+      '**Ваш ник в игре; возраст(OOC); имя (OOC)**',
+      crop(application.answers.profile, 350),
       '',
-      `Опыт в семьях:\n${crop(application.answers.previousFamilies, 500)}`,
+      '**В каких семьях был(-а) до этого; почему ушел**',
+      crop(application.answers.previousFamilies, 500),
       '',
-      `GTA5RP:\n• Часы: **${crop(application.answers.hours, 180)}**\n• Гос и Крайм: **${crop(application.answers.readiness, 250)}**`
+      '**Сколько часов наиграно на GTA5RP?**',
+      crop(application.answers.hours, 180),
+      '',
+      '**Мы играем и Гос и Крайм, ты готов к этому?**',
+      crop(application.answers.readiness, 250),
+      '',
+      '**Пользователь**',
+      `<@${application.userId}>`,
+      '',
+      `**Username** ${application.username || '-'}    **ID** ${application.userId}`
     ].join('\n'))
-    .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(application.createdAt)}` });
+    .setFooter({ text: formatDateTime(application.createdAt) });
 
   if (application.reason) {
     embed.addFields({ name: 'Причина решения', value: crop(application.reason), inline: false });
@@ -913,9 +908,9 @@ function closeTicketButton(application) {
 
 function statusMeta(status) {
   return {
-    new: { label: 'Ожидает рассмотрения', color: 0x991b1b },
-    review: { label: 'На рассмотрении', color: 0xb91c1c },
-    call: { label: 'Вызван на обзвон', color: 0xdc2626 },
+    new: { label: 'Ожидает рассмотрения', color: 0xf59e0b },
+    review: { label: 'На рассмотрении', color: 0x5865f2 },
+    call: { label: 'Вызван на обзвон', color: 0x5865f2 },
     accepted: { label: 'Принят', color: 0x10b981 },
     rejected: { label: 'Отклонен', color: 0xef4444 }
   }[status] || { label: status || 'Неизвестно', color: 0x94a3b8 };
