@@ -612,66 +612,20 @@ async function syncCallChannelAccess(application) {
 }
 
 function panelEmbeds(includeLocalFiles = true) {
-  const embeds = [];
-  const imageEmbed = new EmbedBuilder().setColor(0xf59e0b);
-
-  if (PANEL_IMAGE_URL) {
-    imageEmbed.setImage(PANEL_IMAGE_URL);
-    embeds.push(imageEmbed);
-  } else if (includeLocalFiles && fs.existsSync(LOCAL_PANEL_IMAGE)) {
-    imageEmbed.setImage(`attachment://${PANEL_ATTACHMENT_NAME}`);
-    embeds.push(imageEmbed);
-  }
-
-  const infoEmbed = new EmbedBuilder()
-    .setTitle('👋 Путь в семью начинается здесь!')
+  return [new EmbedBuilder()
+    .setTitle('👋 Путь вместе с семьей REINHARD начинается здесь!')
     .setDescription([
-      `• Уведомление о приглашении на обзвон обычно отправляется в личные сообщения. Если ЛС закрыты, оно отправляется в канал — ${resultChannelText()}. В этот канал также приходят уведомления об отказе в наборе.`,
+      `Уведомление о приглашении на обзвон обычно отправляется в личные сообщения. Если ЛС закрыты, оно отправляется в канал — ${resultChannelText()}. В этот канал также приходят уведомления об отказе в наборе.`,
       '',
-      'Обычно заявки обрабатываются в течение 3–7 дней — всё зависит от того, насколько загружены наши рекрутеры на данный момент.',
+      'Обычно заявки обрабатываются в течение 30-60 минут — всё зависит от того, насколько загружены наши рекруты на данный момент.',
       '',
-      'Подать заявку можно только при открытом наборе. Если не выходит — набор закрыт. Внимательно прочтите сообщение ниже.',
-      '',
-      'Не указывайте пароли, токены и другую конфиденциальную информацию.'
+      'Подать тикет можно только при открытом наборе. Если не выходит — набор закрыт. Внимательно прочтите сообщение ниже.'
     ].join('\n'))
-    .setColor(0xf59e0b);
-
-  if (BRAND_ICON_URL) {
-    infoEmbed.setFooter({ text: `${FAMILY_NAME} 5RP`, iconURL: BRAND_ICON_URL });
-  } else if (includeLocalFiles && fs.existsSync(LOCAL_BRAND_ICON)) {
-    infoEmbed.setFooter({ text: `${FAMILY_NAME} 5RP`, iconURL: `attachment://${BRAND_ATTACHMENT_NAME}` });
-  } else {
-    infoEmbed.setFooter({ text: `${FAMILY_NAME} 5RP` });
-  }
-
-  embeds.push(infoEmbed);
-  return embeds;
+    .setColor(0xf59e0b)];
 }
 
 function panelFiles() {
-  if (PANEL_IMAGE_URL && BRAND_ICON_URL) {
-    return [];
-  }
-
-  const files = [];
-
-  if (!PANEL_IMAGE_URL) {
-    if (fs.existsSync(LOCAL_PANEL_IMAGE)) {
-      files.push(new AttachmentBuilder(LOCAL_PANEL_IMAGE, { name: PANEL_ATTACHMENT_NAME }));
-    } else {
-      console.warn(`Panel image not found: ${LOCAL_PANEL_IMAGE}`);
-    }
-  }
-
-  if (!BRAND_ICON_URL) {
-    if (fs.existsSync(LOCAL_BRAND_ICON)) {
-      files.push(new AttachmentBuilder(LOCAL_BRAND_ICON, { name: BRAND_ATTACHMENT_NAME }));
-    } else {
-      console.warn(`Brand icon not found: ${LOCAL_BRAND_ICON}`);
-    }
-  }
-
-  return files;
+  return [];
 }
 
 function applicationModal() {
