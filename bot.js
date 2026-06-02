@@ -784,7 +784,8 @@ function resultEmbed(application) {
   const data = {
     accepted: [
       `Заявка от пользователя <@${application.userId}>`,
-      '**На вступление в семью была одобрена.**',
+      'На вступление в семью была одобрена. ✅',
+      '',
       application.reviewerId ? `Рассматривал заявку: <@${application.reviewerId}>` : null
     ],
     rejected: [
@@ -800,8 +801,7 @@ function resultEmbed(application) {
 
   return new EmbedBuilder()
     .setDescription(data.filter(line => line !== null && line !== undefined).join('\n'))
-    .setColor(status.color)
-    .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(new Date().toISOString())}` });
+    .setColor(status.color);
 }
 
 function applicationDmEmbed(application) {
