@@ -784,25 +784,22 @@ function resultEmbed(application) {
   const data = {
     accepted: [
       `Заявка от пользователя <@${application.userId}>`,
-      '',
-      'На вступление в семью была одобрена.',
-      '',
-      application.reviewerId ? `Рассматривал заявку: <@${application.reviewerId}>` : ''
+      '**На вступление в семью была одобрена.**',
+      application.reviewerId ? `Рассматривал заявку: <@${application.reviewerId}>` : null
     ],
     rejected: [
       `Заявка от пользователя <@${application.userId}>`,
-      '',
-      'На вступление в семью была отклонена.',
+      'На вступление в семью была отклонена. ❌',
       '',
       `Причина: ${application.reason || 'не указана.'}`,
-      application.reviewerId ? `Рассматривал заявку: <@${application.reviewerId}>` : ''
+      application.reviewerId ? `Рассматривал заявку: <@${application.reviewerId}>` : null
     ]
   }[application.status] || [
     'Статус заявки обновлен.'
   ];
 
   return new EmbedBuilder()
-    .setDescription(data.filter(Boolean).join('\n'))
+    .setDescription(data.filter(line => line !== null && line !== undefined).join('\n'))
     .setColor(status.color)
     .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(new Date().toISOString())}` });
 }
