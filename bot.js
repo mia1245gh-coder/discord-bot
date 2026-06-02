@@ -709,31 +709,45 @@ function inputRow(customId, label, style, placeholder) {
 function applicationEmbed(application, previous = []) {
   const status = statusMeta(application.status);
   const embed = new EmbedBuilder()
-    .setTitle('Заявление')
+    .setTitle('Тикет')
     .setColor(status.color)
     .setDescription([
-      previous.length ? `Предыдущие заявки: ${previous.length}` : 'Предыдущие заявки: не найдено',
-      '',
-      `Статус: **${status.label}**`,
+      `**${status.label}**`,
+      `Кандидат: <@${application.userId}>`,
       application.reviewerId ? `Рекрутер: <@${application.reviewerId}>` : 'Рекрутер: не назначен',
-      '',
-      '**Ваш ник в игре; возраст(OOC); имя (OOC)**',
-      crop(application.answers.profile, 350),
-      '',
-      '**В каких семьях был(-а) до этого; почему ушел**',
-      crop(application.answers.previousFamilies, 500),
-      '',
-      '**Сколько часов наиграно на GTA5RP?**',
-      crop(application.answers.hours, 180),
-      '',
-      '**Мы играем и Гос и Крайм, ты готов к этому?**',
-      crop(application.answers.readiness, 250),
-      '',
-      '**Пользователь**',
-      `<@${application.userId}>`,
-      '',
-      `**Username** ${application.username || '-'}    **ID** ${application.userId}`
+      previous.length ? `История: ${previous.length} пред. заявк.` : 'История: заявок не найдено'
     ].join('\n'))
+    .addFields(
+      {
+        name: 'Профиль',
+        value: [
+          `Username: **${application.username || '-'}**`,
+          `Discord ID: \`${application.userId}\``,
+          application.ticketChannelId ? `Тикет: <#${application.ticketChannelId}>` : ''
+        ].filter(Boolean).join('\n'),
+        inline: false
+      },
+      {
+        name: 'Ваш ник в игре; возраст(OOC); имя (OOC)',
+        value: crop(application.answers.profile, 350),
+        inline: false
+      },
+      {
+        name: 'В каких семьях был(-а) до этого; почему ушел',
+        value: crop(application.answers.previousFamilies, 500),
+        inline: false
+      },
+      {
+        name: 'Сколько часов наиграно на GTA5RP?',
+        value: crop(application.answers.hours, 180),
+        inline: false
+      },
+      {
+        name: 'Мы играем и Гос и Крайм, ты готов к этому?',
+        value: crop(application.answers.readiness, 250),
+        inline: false
+      }
+    )
     .setFooter({ text: formatDateTime(application.createdAt) });
 
   if (application.reason) {
@@ -768,27 +782,26 @@ function resultEmbed(application) {
   const status = statusMeta(application.status);
   const data = {
     accepted: [
-      'Заявка одобрена',
-      '**Кандидат принят в семью.**',
-      `• Кандидат: <@${application.userId}>`,
-      application.reviewerId ? `• Рассматривал: <@${application.reviewerId}>` : '',
-      '• Решение записано в журнал заявок.'
+      `Заявка от пользователя <@${application.userId}>`,
+      '',
+      'На вступление в семью была одобрена.',
+      '',
+      application.reviewerId ? `Рассматривал заявку: <@${application.reviewerId}>` : ''
     ],
     rejected: [
-      'Заявка отклонена',
-      '**По заявке принято отрицательное решение.**',
-      `• Кандидат: <@${application.userId}>`,
-      application.reviewerId ? `• Рассматривал: <@${application.reviewerId}>` : '',
-      `• Причина: ${application.reason || 'не указана.'}`
+      `Заявка от пользователя <@${application.userId}>`,
+      '',
+      'На вступление в семью была отклонена.',
+      '',
+      `Причина: ${application.reason || 'не указана.'}`,
+      application.reviewerId ? `Рассматривал заявку: <@${application.reviewerId}>` : ''
     ]
   }[application.status] || [
-    'Статус заявки',
-    '**Статус заявки обновлен.**'
+    'Статус заявки обновлен.'
   ];
 
   return new EmbedBuilder()
-    .setTitle(data[0])
-    .setDescription(data.slice(1).filter(Boolean).join('\n'))
+    .setDescription(data.filter(Boolean).join('\n'))
     .setColor(status.color)
     .setFooter({ text: `${FAMILY_NAME} 5RP • ${formatDateTime(new Date().toISOString())}` });
 }
