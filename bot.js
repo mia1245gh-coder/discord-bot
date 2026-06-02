@@ -496,6 +496,7 @@ async function createTicketChannel(interaction, application, previous) {
   });
 
   const message = await channel.send({
+    content: ticketMentions(application),
     embeds: [applicationEmbed(application, previous)],
     components: applicationButtons(application)
   });
@@ -970,6 +971,13 @@ function hasAnyRole(member, roleIds) {
 function recruiterMentions() {
   const ids = [...new Set([...ADMIN_ROLE_IDS, ...RECRUITER_ROLE_IDS])];
   return ids.length ? ids.map(id => `<@&${id}>`).join(' ') : '';
+}
+
+function ticketMentions(application) {
+  return [
+    `<@${application.userId}>`,
+    recruiterMentions()
+  ].filter(Boolean).join(' ');
 }
 
 function resultChannelText() {
