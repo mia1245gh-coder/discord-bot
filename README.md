@@ -15,6 +15,7 @@ MVP-бот для заявок в семью:
 /recruit-panel
 /recruit-open status:true
 /recruit-stats
+/recruit-dashboard
 /recruit-find user:@user
 ```
 

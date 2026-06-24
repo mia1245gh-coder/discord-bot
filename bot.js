@@ -40,6 +40,11 @@ const PANEL_ATTACHMENT_NAME = 'reinhard-panel.gif';
 const BRAND_ATTACHMENT_NAME = 'reinhard-avatar.png';
 const FAMILY_NAME = process.env.FAMILY_NAME || 'Reinhard';
 const TICKET_NAME_PREFIX = process.env.TICKET_NAME_PREFIX || 'тикет';
+const BRAND_COLOR = 0xf59e0b;
+const SUCCESS_COLOR = 0x10b981;
+const DANGER_COLOR = 0xef4444;
+const INFO_COLOR = 0x5865f2;
+const MUTED_COLOR = 0x94a3b8;
 const RECRUITER_ROLE_IDS = splitIds(process.env.RECRUITER_ROLE_IDS);
 const ADMIN_ROLE_IDS = splitIds(process.env.ADMIN_ROLE_IDS);
 const RECRUIT_TEMPLATES = [
@@ -173,6 +178,9 @@ async function registerCommands() {
       .setName('recruit-stats')
       .setDescription('Показать статистику заявок.'),
     new SlashCommandBuilder()
+      .setName('recruit-dashboard')
+      .setDescription('Открыть красивую сводку рекрутинга для состава.'),
+    new SlashCommandBuilder()
       .setName('recruit-find')
       .setDescription('Найти историю заявок пользователя.')
       .addUserOption(option =>
@@ -265,7 +273,7 @@ async function handleCommand(interaction) {
     await interaction.reply({
       embeds: [new EmbedBuilder()
         .setTitle(`${FAMILY_NAME} | Статистика заявок`)
-        .setColor(0x2dd4bf)
+        .setColor(SUCCESS_COLOR)
         .addFields(
           { name: 'Всего', value: String(state.applications.length), inline: true },
           { name: 'Новые', value: String(counts.new), inline: true },
@@ -274,6 +282,20 @@ async function handleCommand(interaction) {
           { name: 'Приняты', value: String(counts.accepted), inline: true },
           { name: 'Отказы', value: String(counts.rejected), inline: true }
         )],
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (interaction.commandName === 'recruit-dashboard') {
+    if (!canReviewApplications(interaction.member)) {
+      await interaction.reply({ content: 'Нет доступа к сводке рекрутинга.', ephemeral: true });
+      return;
+    }
+
+    const state = readState();
+    await interaction.reply({
+      embeds: [dashboardEmbed(state)],
       ephemeral: true
     });
     return;
@@ -801,7 +823,7 @@ async function syncCallChannelAccess(application) {
 }
 
 function panelEmbeds(includeLocalFiles = true) {
-  return [new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle('Заявки в семью REINHARD')
     .setDescription([
       '**Путь вместе с семьей начинается здесь.**',
@@ -812,11 +834,35 @@ function panelEmbeds(includeLocalFiles = true) {
       '',
       '**Подача**\nТикет можно открыть только при активном наборе. Если форма не открывается — набор закрыт.'
     ].join('\n'))
-    .setColor(0xf59e0b)];
+    .setColor(BRAND_COLOR);
+
+  if (PANEL_IMAGE_URL) {
+    embed.setImage(PANEL_IMAGE_URL);
+  } else if (includeLocalFiles && fs.existsSync(LOCAL_PANEL_IMAGE)) {
+    embed.setImage(`attachment://${PANEL_ATTACHMENT_NAME}`);
+  }
+
+  if (BRAND_ICON_URL) {
+    embed.setThumbnail(BRAND_ICON_URL);
+  } else if (includeLocalFiles && fs.existsSync(LOCAL_BRAND_ICON)) {
+    embed.setThumbnail(`attachment://${BRAND_ATTACHMENT_NAME}`);
+  }
+
+  return [embed];
 }
 
 function panelFiles() {
-  return [];
+  const files = [];
+
+  if (!PANEL_IMAGE_URL && fs.existsSync(LOCAL_PANEL_IMAGE)) {
+    files.push(new AttachmentBuilder(LOCAL_PANEL_IMAGE, { name: PANEL_ATTACHMENT_NAME }));
+  }
+
+  if (!BRAND_ICON_URL && fs.existsSync(LOCAL_BRAND_ICON)) {
+    files.push(new AttachmentBuilder(LOCAL_BRAND_ICON, { name: BRAND_ATTACHMENT_NAME }));
+  }
+
+  return files;
 }
 
 function applicationModal() {
@@ -1010,10 +1056,79 @@ function applicationDmEmbed(application) {
   return embed;
 }
 
+function dashboardEmbed(state) {
+  const applications = state.applications || [];
+  const counts = countStatuses(applications);
+  const total = applications.length;
+  const active = counts.new + counts.review + counts.call;
+  const completed = counts.accepted + counts.rejected;
+  const acceptanceRate = completed ? Math.round((counts.accepted / completed) * 100) : 0;
+  const lastApplications = applications.slice(0, 5);
+  const lastEvents = (state.events || []).slice(0, 5);
+  const recruitmentOpen = state.settings?.recruitmentOpen !== false;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${FAMILY_NAME} | Центр рекрутинга`)
+    .setColor(recruitmentOpen ? BRAND_COLOR : DANGER_COLOR)
+    .setDescription([
+      `**Набор сейчас ${recruitmentOpen ? 'открыт' : 'закрыт'}.**`,
+      `Активных заявок: **${active}**. Завершено: **${completed}**. Принятие среди завершенных: **${acceptanceRate}%**.`
+    ].join('\n'))
+    .addFields(
+      {
+        name: 'Воронка',
+        value: [
+          statusLine('Новые', counts.new, total),
+          statusLine('На рассмотрении', counts.review, total),
+          statusLine('Обзвон', counts.call, total),
+          statusLine('Приняты', counts.accepted, total),
+          statusLine('Отказы', counts.rejected, total)
+        ].join('\n'),
+        inline: false
+      },
+      {
+        name: 'Сводка',
+        value: [
+          `Всего заявок: **${total}**`,
+          `Ожидают действия: **${active}**`,
+          `Последнее обновление: **${formatDateTime(new Date().toISOString())}**`
+        ].join('\n'),
+        inline: true
+      },
+      {
+        name: 'Каналы',
+        value: [
+          LOG_CHANNEL_ID ? `Логи: <#${LOG_CHANNEL_ID}>` : 'Логи: не указан канал',
+          RESULT_CHANNEL_ID ? `Итоги: <#${RESULT_CHANNEL_ID}>` : 'Итоги: не указан канал',
+          CALL_CHANNEL_ID ? `Обзвон: <#${CALL_CHANNEL_ID}>` : 'Обзвон: не указан канал'
+        ].join('\n'),
+        inline: true
+      },
+      {
+        name: 'Последние заявки',
+        value: lastApplications.length ? lastApplications.map(compactApplicationLine).join('\n') : 'Заявок пока нет.',
+        inline: false
+      },
+      {
+        name: 'Журнал действий',
+        value: lastEvents.length ? lastEvents.map(compactEventLine).join('\n') : 'Событий пока нет.',
+        inline: false
+      }
+    )
+    .setFooter({ text: `${FAMILY_NAME} recruiting dashboard` })
+    .setTimestamp(new Date());
+
+  if (BRAND_ICON_URL) {
+    embed.setThumbnail(BRAND_ICON_URL);
+  }
+
+  return embed;
+}
+
 function historyEmbed(user, items) {
   const embed = new EmbedBuilder()
     .setTitle(`${FAMILY_NAME} | История заявок`)
-    .setColor(0x60a5fa)
+    .setColor(INFO_COLOR)
     .setDescription(items.length ? `Последние заявки пользователя <@${user.id}>` : `Заявок пользователя <@${user.id}> не найдено.`);
 
   for (const item of items) {
@@ -1102,14 +1217,51 @@ function templateMenuRows(application) {
   ];
 }
 
+function statusLine(label, value, total) {
+  const percent = total ? Math.round((value / total) * 100) : 0;
+  return `${label}: **${value}** ${progressBar(percent)} ${percent}%`;
+}
+
+function progressBar(percent) {
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const filled = Math.round(safePercent / 10);
+  return `${'█'.repeat(filled)}${'░'.repeat(10 - filled)}`;
+}
+
+function compactApplicationLine(application) {
+  const status = statusMeta(application.status);
+  const reviewer = application.reviewerId ? `, рекрутер <@${application.reviewerId}>` : '';
+  const ticket = application.ticketChannelId ? `, <#${application.ticketChannelId}>` : '';
+  return `**${status.label}** | <@${application.userId}>${reviewer}${ticket} | ${formatDateTime(application.createdAt)}`;
+}
+
+function compactEventLine(event) {
+  const actor = event.actorId ? `<@${event.actorId}>` : 'система';
+  return `**${eventLabel(event.type)}** | ${actor} | ${formatDateTime(event.at)}`;
+}
+
+function eventLabel(type) {
+  return {
+    'application-created': 'Создана заявка',
+    'application-new': 'Новая заявка',
+    'application-review': 'Взята в работу',
+    'application-call': 'Вызван на обзвон',
+    'application-accepted': 'Заявка принята',
+    'application-rejected': 'Заявка отклонена',
+    'ticket-closed': 'Тикет закрыт',
+    'recruitment-opened': 'Набор открыт',
+    'recruitment-closed': 'Набор закрыт'
+  }[type] || type || 'Событие';
+}
+
 function statusMeta(status) {
   return {
-    new: { label: 'Ожидает рассмотрения', color: 0xf59e0b },
-    review: { label: 'На рассмотрении', color: 0x5865f2 },
-    call: { label: 'Вызван на обзвон', color: 0x5865f2 },
-    accepted: { label: 'Принят', color: 0x10b981 },
-    rejected: { label: 'Отклонен', color: 0xef4444 }
-  }[status] || { label: status || 'Неизвестно', color: 0x94a3b8 };
+    new: { label: 'Ожидает рассмотрения', color: BRAND_COLOR },
+    review: { label: 'На рассмотрении', color: INFO_COLOR },
+    call: { label: 'Вызван на обзвон', color: INFO_COLOR },
+    accepted: { label: 'Принят', color: SUCCESS_COLOR },
+    rejected: { label: 'Отклонен', color: DANGER_COLOR }
+  }[status] || { label: status || 'Неизвестно', color: MUTED_COLOR };
 }
 
 function statusReplyText(status, application) {
